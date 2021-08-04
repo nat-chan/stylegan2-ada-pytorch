@@ -1,0 +1,24 @@
+name: ada
+channels:
+  - pytorch
+  - conda-forge
+  - default
+  - anaconda
+dependencies:
+  - python=3.7
+  - pytorch=1.7.1
+  - torchvision=0.8.2
+  - torchaudio=0.7.2
+  - cudatoolkit=11.0
+  - tensorboard
+  - scipy
+  - pip
+  - pip:
+    - click
+    - requests
+    - tqdm
+    - pyspng
+    - ninja
+    - psutil
+    - imageio-ffmpeg==0.4.3
+# vim:ts=2 sw=2
