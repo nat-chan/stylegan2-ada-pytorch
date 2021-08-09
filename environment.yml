@@ -15,6 +15,9 @@ dependencies:
   - scipy
   - pudb
   - nbstripout
+  - debugpy
+  - matplotlib
+  - ipywidgets
   - pip
   - pip:
     - click
@@ -24,4 +27,7 @@ dependencies:
     - ninja
     - psutil
     - imageio-ffmpeg==0.4.3
+    - python-vivid
+    - ipynb
+    - dotdict
 # vim:ts=2 sw=2
