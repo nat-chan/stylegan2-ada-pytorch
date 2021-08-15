@@ -30,4 +30,5 @@ dependencies:
     - python-vivid
     - ipynb
     - dotdict
+    - imagesize
 # vim:ts=2 sw=2
