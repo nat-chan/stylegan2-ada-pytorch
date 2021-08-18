@@ -18,6 +18,7 @@ dependencies:
   - debugpy
   - matplotlib
   - ipywidgets
+  - opencv
   - pip
   - pip:
     - click
