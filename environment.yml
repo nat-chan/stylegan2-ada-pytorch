@@ -19,6 +19,8 @@ dependencies:
   - matplotlib
   - ipywidgets
   - opencv
+  - imageio
+  - ipykernel
   - pip
   - pip:
     - click
