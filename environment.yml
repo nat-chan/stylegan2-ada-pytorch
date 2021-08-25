@@ -4,6 +4,7 @@ channels:
   - conda-forge
   - default
   - anaconda
+  - plotly
 dependencies:
   - python=3.7
   - pytorch=1.7.1
@@ -21,6 +22,7 @@ dependencies:
   - opencv
   - imageio
   - ipykernel
+  - plotly
   - pip
   - pip:
     - click
@@ -33,4 +35,5 @@ dependencies:
     - ipynb
     - dotdict
     - imagesize
+    - git+https://github.com/not522/ac-library-python
 # vim:ts=2 sw=2
