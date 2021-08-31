@@ -37,6 +37,16 @@ def fname2id(fname: str) -> str:
 def id2fname(_id, prefix="512white", ext=lambda _: "png", bucket=bucket):
     return str(root/f"danbooru2020/{prefix}/{bucket(_id)}/{_id}.{ext(_id)}")
 
+class CurriedFunc:
+    def __init__(self, func):
+        self.func = func
+    @lru_cache(maxsize=None)
+    def __call__(self, *args, **kwargs):
+        return lambda x: self.func(x, *args, **kwargs)
+    def __getattr__(self, x):
+        return self.__call__(x)
+id2 = CurriedFunc(id2fname)
+
 def budget(N, workers=8):
     def g(n, d):
         if not d <= n:
@@ -77,12 +87,6 @@ class Filter(dict):
         super().__setitem__(k, v)
         i = list(self.keys()).index(k)
         print("{:>3}  {:>9,}  {}".format(i, len(v), k))
-
-class ID2:
-    @lru_cache(maxsize=None)
-    def __getattr__(self, key):
-        return lambda _id: id2fname(_id, prefix=key)
-id2 = ID2()
 
 class TQDMBytesReader(object):
     def __init__(self, fd, **kwargs):
