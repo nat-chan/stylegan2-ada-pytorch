@@ -21,7 +21,7 @@ rcParams = {
     "axes.titlesize": "x-large",
 }
 
-cmap = plt.get_cmap("tab10")
+cmap = plt.get_cmap("tab20b")
 
 def bucket(_id: str) -> str:
     return _id[-3:].zfill(4)
