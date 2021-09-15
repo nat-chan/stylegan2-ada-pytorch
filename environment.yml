@@ -24,6 +24,7 @@ dependencies:
   - ipykernel
   - plotly
   - pandas
+  - scikit-image
   - pip
   - pip:
     - click
@@ -38,4 +39,6 @@ dependencies:
     - imagesize
     - git+https://github.com/not522/ac-library-python
     - p2j # nbconvertでできなかった .py → .ipynb
+    - ipyplot # 画像ビューア
+    - nokogiri # 自作utility関数群
 # vim:ts=2 sw=2
