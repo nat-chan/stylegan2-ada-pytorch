@@ -1,13 +1,11 @@
 from typing import *
-from IPython.display import HTML, Javascript, display
-import ipywidgets as wi
+from IPython.display import HTML, display
 from pathlib import Path
-from random import Random
-import pickle
 from tqdm.notebook import tqdm
 from pickle import Unpickler
-from functools import lru_cache
 import matplotlib.pyplot as plt
+from nokogiri.curry import curry
+from nokogiri.tqdm_load import tqdm_load
 
 root = Path("/data/natsuki")
 
@@ -37,29 +35,15 @@ def fname2id(fname: str) -> str:
 def fname2prefix(fname: str) -> str:
     return str(fname).split("/")[-3]
 
-def id2fname(_id, prefix="512white", ext="png", bucket=bucket, root=root):
+def id2fname(_id, prefix="512white", ext="png", int="", bucket=bucket, root=root):
     _id = str(_id)
     if not type(ext) == str:
         ext = ext(_id)
     if not type(bucket) == str:
         bucket = bucket(_id)
-    return str(Path(root)/f"danbooru2020/{prefix}/{bucket}/{_id}.{ext}")
+    return str(Path(root)/f"danbooru2020/{prefix}/{bucket}/{int}{_id}.{ext}")
 
-class CurriedFunc:
-    def __init__(self, func, *args):
-        self.func = func
-        self.args = args
-    def __getattr__(self, arg):
-        return self.__getitem__(arg)
-    def __getitem__(self, arg):
-        return CurriedFunc(self.func, *self.args, arg)
-    def __call__(self, *args, **kwargs):
-        return self.func(*args, *self.args, **kwargs)
-    def __str__(self):
-        return f"f({', '.join(['・']+list(self.args))})"
-    def __repr__(self):
-        return self.__str__()
-id2 = CurriedFunc(id2fname)
+id2 = curry(id2fname)
 
 def budget(N, workers=8):
     def g(n, d):
@@ -101,30 +85,3 @@ class Filter(dict):
         super().__setitem__(k, v)
         i = list(self.keys()).index(k)
         print("{:>3}  {:>9,}  {}".format(i, len(v), k))
-
-class TQDMBytesReader(object):
-    def __init__(self, fd, tqdm, total, desc=''):
-        self.fd = fd
-        self.tqdm = tqdm(total=total)
-        self.tqdm.set_description(desc)
-    def read(self, size=-1):
-        bytes = self.fd.read(size)
-        self.tqdm.update(len(bytes))
-        return bytes
-    def readline(self):
-        bytes = self.fd.readline()
-        self.tqdm.update(len(bytes))
-        return bytes
-    def __enter__(self):
-        self.tqdm.__enter__()
-        return self
-    def __exit__(self, *args, **kwargs):
-        return self.tqdm.__exit__(*args, **kwargs)
-
-def tqdm_load(fname, tqdm=tqdm, desc=''):
-    with open(fname, "rb") as fd:
-         total = Path(fname).stat().st_size
-         with TQDMBytesReader(fd, tqdm=tqdm, total=total, desc=desc) as pbfd:
-             up = Unpickler(pbfd)
-             obj = up.load()
-    return obj
