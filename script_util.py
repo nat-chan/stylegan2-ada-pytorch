@@ -35,13 +35,13 @@ def fname2id(fname: str) -> str:
 def fname2prefix(fname: str) -> str:
     return str(fname).split("/")[-3]
 
-def id2fname(_id, prefix="512white", ext="png", int="", bucket=bucket, root=root):
+def id2fname(_id, prefix="512white", ext="png", bucket=bucket, front="", back="", root=root):
     _id = str(_id)
     if not type(ext) == str:
         ext = ext(_id)
     if not type(bucket) == str:
         bucket = bucket(_id)
-    return str(Path(root)/f"danbooru2020/{prefix}/{bucket}/{int}{_id}.{ext}")
+    return str(Path(root)/f"danbooru2020/{prefix}/{bucket}/{front}{_id}{back}.{ext}")
 
 id2 = curry(id2fname)
 
