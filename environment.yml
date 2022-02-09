@@ -24,7 +24,11 @@ dependencies:
   - ipykernel
   - plotly
   - pandas
-  - scikit-image
+  - scikit-image # i2vで何故か再インストール
+  - scikit-learn
+  - ipywidgets     # app
+  - ipycanvas      # app
+  - ipyfilechooser # app
   - pip
   - pip:
     - click
@@ -41,4 +45,5 @@ dependencies:
     - p2j # nbconvertでできなかった .py → .ipynb
     - ipyplot # 画像ビューア
     - nokogiri # 自作utility関数群
+    - gradio # app
 # vim:ts=2 sw=2
