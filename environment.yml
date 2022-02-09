@@ -1,4 +1,4 @@
-name: ada
+: ada
 channels:
   - pytorch
   - conda-forge
@@ -29,6 +29,7 @@ dependencies:
   - ipywidgets     # app
   - ipycanvas      # app
   - ipyfilechooser # app
+  - pyzbar # app qrcode
   - pip
   - pip:
     - click
@@ -46,4 +47,5 @@ dependencies:
     - ipyplot # 画像ビューア
     - nokogiri # 自作utility関数群
     - gradio # app
+    - qrcode
 # vim:ts=2 sw=2
