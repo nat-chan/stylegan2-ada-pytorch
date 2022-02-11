@@ -30,6 +30,7 @@ dependencies:
   - ipycanvas      # app
   - ipyfilechooser # app
   - pyzbar # app qrcode
+  - coloredlogs # app logging
   - pip
   - pip:
     - click
