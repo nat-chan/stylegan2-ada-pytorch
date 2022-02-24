@@ -35,6 +35,11 @@ def project(
     noise_ramp_length          = 0.75,
     regularize_noise_weight    = 1e5,
     verbose                    = False,
+    yield_more                 = False,
+    dist_weight                = 1,
+    additional_feat            = lambda target: 0,
+    additional_loss            = lambda target, synth: 0,
+    additional_weight          = 0,
     device: torch.device
 ):
     assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
@@ -63,6 +68,7 @@ def project(
 
     # Features for target image.
     target_images = target.unsqueeze(0).to(device).to(torch.float32)
+    additional_target_features = additional_feat(target_images)
     if target_images.shape[2] > 256:
         target_images = F.interpolate(target_images, size=(256, 256), mode='area')
     target_features = vgg16(target_images, resize_images=False, return_lpips=True)
@@ -94,6 +100,16 @@ def project(
 
         # Downsample image to 256x256 if it's larger than that. VGG was built for 224x224 images.
         synth_images = (synth_images + 1) * (255/2)
+
+        if yield_more:
+            synth_pil = PIL.Image.fromarray(
+                synth_images.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy(),
+                'RGB',
+            )
+        
+        additional_synth_features = additional_feat(synth_images)
+        additional_dist = additional_loss(additional_target_features, additional_synth_features)
+
         if synth_images.shape[2] > 256:
             synth_images = F.interpolate(synth_images, size=(256, 256), mode='area')
 
@@ -111,13 +127,14 @@ def project(
                 if noise.shape[2] <= 8:
                     break
                 noise = F.avg_pool2d(noise, kernel_size=2)
-        loss = dist + reg_loss * regularize_noise_weight
+        loss = dist * dist_weight + additional_dist * additional_weight + reg_loss * regularize_noise_weight
 
         # Step
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
-        logprint(f'step {step+1:>4d}/{num_steps}: dist {dist:<4.2f} loss {float(loss):<5.2f}')
+        log_txt = f'step {step+1:>4d}/{num_steps}: dist {dist:<4.2f} loss {float(loss):<5.2f}'
+        logprint(log_txt)
 
         # Save projected W for each optimization step.
         w_out[step] = w_opt.detach()[0]
@@ -128,7 +145,10 @@ def project(
                 buf -= buf.mean()
                 buf *= buf.square().mean().rsqrt()
 
-    return w_out.repeat([1, G.mapping.num_ws, 1])
+        if yield_more:
+            yield {"pil": synth_pil, "log": log_txt, "dist": float(dist), "loss": float(loss), "additional_dist": float(additional_dist)}
+        else:
+            yield w_out[step].repeat([G.mapping.num_ws, 1])
 
 #----------------------------------------------------------------------------
 
@@ -197,7 +217,7 @@ def run_projection(
 
     # Save final projected frame and W vector.
     target_pil.save(f'{outdir}/target.png')
-    projected_w = projected_w_steps[-1]
+#    projected_w = projected_w_steps[-1]
     synth_image = G.synthesis(projected_w.unsqueeze(0), noise_mode='const')
     synth_image = (synth_image + 1) * (255/2)
     synth_image = synth_image.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
