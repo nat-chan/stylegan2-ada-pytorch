@@ -64,6 +64,10 @@ def setup_training_loop_kwargs(
     allow_tf32 = None, # Allow PyTorch to use TF32 for matmul and convolutions: <bool>, default = False
     nobench    = None, # Disable cuDNN benchmarking: <bool>, default = False
     workers    = None, # Override number of DataLoader workers: <int>, default = 3
+
+    # Additional Settings
+    custom_loss = None, # Custom loss type
+    cl_weight   = None, # Custom loss weight
 ):
     args = dnnlib.EasyDict()
 
@@ -115,6 +119,9 @@ def setup_training_loop_kwargs(
         del training_set # conserve memory
     except IOError as err:
         raise UserError(f'--data: {err}')
+    
+    if custom_loss != 'StyleGAN2Loss':
+        desc += f'-{custom_loss}-{cl_weight}'
 
     if cond is None:
         cond = False
@@ -184,7 +191,7 @@ def setup_training_loop_kwargs(
 
     args.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', lr=spec.lrate, betas=[0,0.99], eps=1e-8)
     args.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', lr=spec.lrate, betas=[0,0.99], eps=1e-8)
-    args.loss_kwargs = dnnlib.EasyDict(class_name='training.loss.StyleGAN2Loss', r1_gamma=spec.gamma)
+    args.loss_kwargs = dnnlib.EasyDict(class_name=f'training.loss.{custom_loss}', r1_gamma=spec.gamma, cl_weight=cl_weight)
 
     args.total_kimg = spec.kimg
     args.batch_size = spec.mb
@@ -434,6 +441,10 @@ class CommaSeparatedList(click.ParamType):
 @click.option('--nobench', help='Disable cuDNN benchmarking', type=bool, metavar='BOOL')
 @click.option('--allow-tf32', help='Allow PyTorch to use TF32 internally', type=bool, metavar='BOOL')
 @click.option('--workers', help='Override number of DataLoader workers', type=int, metavar='INT')
+
+# Additional Settings
+@click.option('--custom_loss', help='Custom loss type [default: StyleGAN2Loss]', default='StyleGAN2Loss', type=click.Choice(['StyleGAN2Loss', 'TagBizLoss']))
+@click.option('--cl_weight', help='Custom loss weight', default=1.0, type=float)
 
 def main(ctx, outdir, dry_run, **config_kwargs):
     """Train a GAN using the techniques described in the paper

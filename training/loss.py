@@ -21,7 +21,9 @@ class Loss:
 #----------------------------------------------------------------------------
 
 class StyleGAN2Loss(Loss):
-    def __init__(self, device, G_mapping, G_synthesis, D, augment_pipe=None, style_mixing_prob=0.9, r1_gamma=10, pl_batch_shrink=2, pl_decay=0.01, pl_weight=2):
+    # (..., **kwargs)にしてオプション引数を受け取れるようにする
+    # self.estimater = オプションでやる Feature Extractor/Pose Estimator
+    def __init__(self, device, G_mapping, G_synthesis, D, augment_pipe=None, style_mixing_prob=0.9, r1_gamma=10, pl_batch_shrink=2, pl_decay=0.01, pl_weight=2, *args, **kwargs):
         super().__init__()
         self.device = device
         self.G_mapping = G_mapping
@@ -54,14 +56,10 @@ class StyleGAN2Loss(Loss):
             logits = self.D(img, c)
         return logits
 
-    def accumulate_gradients(self, phase, real_img, real_c, gen_z, gen_c, sync, gain):
-        assert phase in ['Gmain', 'Greg', 'Gboth', 'Dmain', 'Dreg', 'Dboth']
-        do_Gmain = (phase in ['Gmain', 'Gboth'])
-        do_Dmain = (phase in ['Dmain', 'Dboth'])
-        do_Gpl   = (phase in ['Greg', 'Gboth']) and (self.pl_weight != 0)
-        do_Dr1   = (phase in ['Dreg', 'Dboth']) and (self.r1_gamma != 0)
-
+    def accu_Gmain(self, phase, real_img, real_c, gen_z, gen_c, sync, gain):
         # Gmain: Maximize logits for generated images.
+        do_Gmain = (phase in ['Gmain', 'Gboth'])
+        do_Gpl   = (phase in ['Greg', 'Gboth']) and (self.pl_weight != 0)
         if do_Gmain:
             with torch.autograd.profiler.record_function('Gmain_forward'):
                 gen_img, _gen_ws = self.run_G(gen_z, gen_c, sync=(sync and not do_Gpl)) # May get synced by Gpl.
@@ -70,10 +68,13 @@ class StyleGAN2Loss(Loss):
                 training_stats.report('Loss/signs/fake', gen_logits.sign())
                 loss_Gmain = torch.nn.functional.softplus(-gen_logits) # -log(sigmoid(gen_logits))
                 training_stats.report('Loss/G/loss', loss_Gmain)
+            # loss_Dr1を参考にFの出力とのlossを足す
             with torch.autograd.profiler.record_function('Gmain_backward'):
                 loss_Gmain.mean().mul(gain).backward()
 
+    def accu_Gpl(self, phase, real_img, real_c, gen_z, gen_c, sync, gain):
         # Gpl: Apply path length regularization.
+        do_Gpl   = (phase in ['Greg', 'Gboth']) and (self.pl_weight != 0)
         if do_Gpl:
             with torch.autograd.profiler.record_function('Gpl_forward'):
                 batch_size = gen_z.shape[0] // self.pl_batch_shrink
@@ -91,7 +92,10 @@ class StyleGAN2Loss(Loss):
             with torch.autograd.profiler.record_function('Gpl_backward'):
                 (gen_img[:, 0, 0, 0] * 0 + loss_Gpl).mean().mul(gain).backward()
 
+    def accu_Dmain(self, phase, real_img, real_c, gen_z, gen_c, sync, gain):
         # Dmain: Minimize logits for generated images.
+        do_Dmain = (phase in ['Dmain', 'Dboth'])
+        do_Dr1   = (phase in ['Dreg', 'Dboth']) and (self.r1_gamma != 0)
         loss_Dgen = 0
         if do_Dmain:
             with torch.autograd.profiler.record_function('Dgen_forward'):
@@ -130,4 +134,49 @@ class StyleGAN2Loss(Loss):
             with torch.autograd.profiler.record_function(name + '_backward'):
                 (real_logits * 0 + loss_Dreal + loss_Dr1).mean().mul(gain).backward()
 
+
+    def accumulate_gradients(self, phase, real_img, real_c, gen_z, gen_c, sync, gain):
+        assert phase in ['Gmain', 'Greg', 'Gboth', 'Dmain', 'Dreg', 'Dboth']
+        # Gmain: Maximize logits for generated images.
+        self.accu_Gmain(phase, real_img, real_c, gen_z, gen_c, sync, gain)
+        # Gpl: Apply path length regularization.
+        self.accu_Gpl(phase, real_img, real_c, gen_z, gen_c, sync, gain)
+        # Dmain: Minimize logits for generated images.
+        # Dmain: Maximize logits for real images.
+        # Dr1: Apply R1 regularization.
+        self.accu_Dmain(phase, real_img, real_c, gen_z, gen_c, sync, gain)
+
 #----------------------------------------------------------------------------
+
+class TagBizLoss(StyleGAN2Loss):
+    def __init__(self, F, cl_weight, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.F = F
+        self.cl_weight = cl_weight
+        self.bce = torch.nn.BCEWithLogitsLoss(reduction='none')
+
+    def run_F(self, img, c, sync):
+        with misc.ddp_sync(self.F, sync):
+            resized_img = torch.nn.functional.interpolate(img, size=(256, 256), mode='area')*.5 + .5
+            pred = self.F(resized_img, return_more=False)["raw"]
+            loss = self.bce(c, pred)
+#            loss = self.F.loss(c, pred, reduce=False)["loss"]
+        return loss
+
+    def accu_Gmain(self, phase, real_img, real_c, gen_z, gen_c, sync, gain):
+        # Gmain: Maximize logits for generated images.
+        do_Gmain = (phase in ['Gmain', 'Gboth'])
+        do_Gpl   = (phase in ['Greg', 'Gboth']) and (self.pl_weight != 0)
+        if do_Gmain:
+            with torch.autograd.profiler.record_function('Gmain_forward'):
+                gen_img, _gen_ws = self.run_G(gen_z, gen_c, sync=(sync and not do_Gpl)) # May get synced by Gpl.
+                gen_logits = self.run_D(gen_img, gen_c, sync=False)
+                training_stats.report('Loss/scores/fake', gen_logits)
+                training_stats.report('Loss/signs/fake', gen_logits.sign())
+                loss_Gmain = torch.nn.functional.softplus(-gen_logits) # -log(sigmoid(gen_logits))
+                training_stats.report('Loss/G/loss', loss_Gmain)
+                loss_F = self.run_F(gen_img, gen_c, sync=False)
+                training_stats.report('Loss/F/loss', loss_Gmain)
+            # loss_Dr1を参考にFの出力とのlossを足す
+            with torch.autograd.profiler.record_function('Gmain_backward'):
+                (loss_Gmain + loss_F*self.cl_weight).mean().mul(gain).backward()

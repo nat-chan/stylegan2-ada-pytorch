@@ -18,7 +18,6 @@ dependencies:
   - nbstripout
   - debugpy
   - matplotlib
-  - ipywidgets
   - opencv
   - imageio
   - ipykernel
@@ -26,6 +25,10 @@ dependencies:
   - pandas
   - scikit-image # i2vで何故か再インストール
   - scikit-learn
+  - pytorch-lightning # danbooru_tagger
+  - detectron2 # pose_estimator
+  - iopath
+  - omegaconf
   - ipywidgets     # app
   - ipycanvas      # app
   - ipyfilechooser # app

@@ -24,6 +24,8 @@ from torch_utils.ops import grid_sample_gradfix
 import legacy
 from metrics import metric_main
 
+from nokogiri.working_dir import working_dir
+
 #----------------------------------------------------------------------------
 
 def setup_snapshot_image_grid(training_set, random_seed=0):
@@ -150,6 +152,19 @@ def training_loop(
     G = dnnlib.util.construct_class_by_name(**G_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
     D = dnnlib.util.construct_class_by_name(**D_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
     G_ema = copy.deepcopy(G).eval()
+    names_modules = [('G_mapping', G.mapping), ('G_synthesis', G.synthesis), ('D', D), (None, G_ema)]
+
+    if loss_kwargs.class_name != 'training.loss.StyleGAN2Loss':
+        if rank == 0:
+            print(f'Constructing additional networks for {loss_kwargs.class_name}...')
+    if loss_kwargs.class_name == 'training.loss.TagBizLoss':
+        with working_dir("/home/natsuki/bizarre-pose-estimator"):
+            from _train.danbooru_tagger.models.kate import Model as DanbooruTagger
+            F = DanbooruTagger.load_from_checkpoint(
+                './_train/danbooru_tagger/runs/waning_kate_vulcan0001/checkpoints/'
+                'epoch=0022-val_f2=0.4461-val_loss=0.0766.ckpt'
+            ).eval().requires_grad_(False).to(device)
+        names_modules += [('F', F)]
 
     # Resume from existing pickle.
     if (resume_pkl is not None) and (rank == 0):
@@ -176,12 +191,14 @@ def training_loop(
         augment_pipe.p.copy_(torch.as_tensor(augment_p))
         if ada_target is not None:
             ada_stats = training_stats.Collector(regex='Loss/signs/real')
+    names_modules += [('augment_pipe', augment_pipe)]
 
     # Distribute across GPUs.
     if rank == 0:
         print(f'Distributing across {num_gpus} GPUs...')
     ddp_modules = dict()
-    for name, module in [('G_mapping', G.mapping), ('G_synthesis', G.synthesis), ('D', D), (None, G_ema), ('augment_pipe', augment_pipe)]:
+
+    for name, module in names_modules:
         if (num_gpus > 1) and (module is not None) and len(list(module.parameters())) != 0:
             module.requires_grad_(True)
             module = torch.nn.parallel.DistributedDataParallel(module, device_ids=[device], broadcast_buffers=False)
