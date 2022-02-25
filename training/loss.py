@@ -176,7 +176,7 @@ class TagBizLoss(StyleGAN2Loss):
                 loss_Gmain = torch.nn.functional.softplus(-gen_logits) # -log(sigmoid(gen_logits))
                 training_stats.report('Loss/G/loss', loss_Gmain)
                 loss_F = self.run_F(gen_img, gen_c, sync=False)
-                training_stats.report('Loss/F/loss', loss_Gmain)
+                training_stats.report('Loss/F/loss', loss_F)
             # loss_Dr1を参考にFの出力とのlossを足す
             with torch.autograd.profiler.record_function('Gmain_backward'):
                 (loss_Gmain + loss_F*self.cl_weight).mean().mul(gain).backward()
