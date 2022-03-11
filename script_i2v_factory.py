@@ -9,16 +9,17 @@ from tqdm import tqdm
 from PIL import Image
 from nokogiri.working_dir import working_dir
 
-fm = Path("/data/natsuki/training116/00030-v4-mirror-auto4-gamma100-batch64-noaug-resumecustom/network-snapshot-011289.pkl")
-#fm = Path("/data/natsuki/training116/00023-white_yc05_yw04-mirror-auto4-gamma10-noaug/network-snapshot-021800.pkl")
+#fm = Path("/data/natsuki/training116/00030-v4-mirror-auto4-gamma100-batch64-noaug-resumecustom/network-snapshot-011289.pkl")
+fm = Path("/data/natsuki/training116/00023-white_yc05_yw04-mirror-auto4-gamma10-noaug/network-snapshot-021800.pkl")
 assert fm.is_file()
 with open(fm, 'rb') as f:
     G = pickle.load(f)['G_ema'].to(device)
 with working_dir("/home/natsuki/illustration2vec"):
-    import i2v
-    model_tag = i2v.make_i2v_with_chainer("illust2vec_tag_ver200.caffemodel", "tag_list.json")
+    import i2v.pytorch_i2v
+    model_tag = i2v.pytorch_i2v.PytorchI2V(
+                "illust2vec_tag_ver200.pth", "tag_list.json").eval().requires_grad_(False).to(device)
 
-query = "hatsune miku"
+query = "flandre scarlet"
 threshold=0.9
 skip = 0
 batch = 32
@@ -40,13 +41,12 @@ for j in pbar:
     synth_image = (synth_image + 1) * (255/2)
     synth_image = synth_image.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8).cpu().numpy()
     imgs = [Image.fromarray(synth_image[i], 'RGB') for i in range(batch)]
-    pred_tag = model_tag.estimate_plausible_tags(imgs, threshold=threshold)
+    pred = model_tag._estimate(imgs)
     for i in range(batch):
         seed = batch*j+i+skip
         pbar.set_description(f"{ok=} {skip=} {seed=} {sample_num=}")
-        filtered = next(filter(lambda x: x[0]==query, pred_tag[i]["character"]), None)
-        if filtered:
-            _, score = filtered
+        score = pred[i][model_tag.index[query]]
+        if threshold < score:
             txt = f"{score:.8f}_"[2:]+f"{seed}.png"
             imgs[i].save(root/txt)
             ok += 1
