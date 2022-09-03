@@ -2,10 +2,13 @@ from typing import *
 from IPython.display import HTML, display
 from pathlib import Path
 from tqdm.notebook import tqdm
-from pickle import Unpickler
+import pickle
 import matplotlib.pyplot as plt
+import torch
+import numpy as np
+from PIL import Image
 from nokogiri.curry import curry
-from nokogiri.tqdm_load import tqdm_load
+from collections.abc import Iterable
 
 root = Path("/data/natsuki")
 
@@ -85,3 +88,30 @@ class Filter(dict):
         super().__setitem__(k, v)
         i = list(self.keys()).index(k)
         print("{:>3}  {:>9,}  {}".format(i, len(v), k))
+
+def wrap_G(fm, device):
+    with open(fm, 'rb') as f:
+        G = pickle.load(f)['G_ema'].to(device)
+    def map(seed=1, psi=1):
+        label = torch.zeros([1, G.c_dim], device=device)
+        if isinstance(seed, Iterable):
+            z = torch.from_numpy(np.array([np.random.RandomState(s).randn(G.z_dim) for s in seed])).to(device)
+        else:
+            z = torch.from_numpy(np.random.RandomState(seed).randn(1, G.z_dim)).to(device)
+        w = G.mapping(z, label, truncation_psi=psi)
+        return w
+    def synth(w, synth=True, retarr=False):
+        if synth:
+            synth_image = G.synthesis(w, noise_mode='const')
+        else:
+            synth_image = w
+        synth_image = (synth_image + 1) * (255/2)
+        synth_image = synth_image.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
+        img = Image.fromarray(synth_image, 'RGB')
+        if retarr:
+            return img, synth_image
+        else:
+            return img
+    G.map = map
+    G.synth = synth
+    return G
