@@ -89,7 +89,7 @@ class Filter(dict):
         i = list(self.keys()).index(k)
         print("{:>3}  {:>9,}  {}".format(i, len(v), k))
 
-def wrap_G(fm, device):
+def wrap_G(fm, device="cuda"):
     with open(fm, 'rb') as f:
         G = pickle.load(f)['G_ema'].to(device)
     def map(seed=1, psi=1):
