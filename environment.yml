@@ -1,4 +1,4 @@
-: ada
+name: ada2
 channels:
   - pytorch
   - conda-forge
@@ -52,4 +52,5 @@ dependencies:
     - nokogiri # 自作utility関数群
     - gradio # app
     - qrcode
+    - twitter
 # vim:ts=2 sw=2
