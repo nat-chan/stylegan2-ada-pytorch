@@ -39,8 +39,8 @@ def lload():
         for k, tag in enumerate(model_tag.tags):
             with open(root/f"{k}.pkl", "rb") as f:
                 master[k] = pickle.load(f)
-            with open(root/f"skip.txt", "r") as f:
-                skip = int(f.read())
+        with open(root/f"skip.txt", "r") as f:
+            skip = int(f.read())
     except:
         for k, tag in enumerate(model_tag.tags):
             master[k] = list()
