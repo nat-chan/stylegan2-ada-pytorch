@@ -52,5 +52,7 @@ dependencies:
     - nokogiri # 自作utility関数群
     - gradio # app
     - qrcode
-    - twitter
+    - pyzbar # sudo apt install libzbar0
+    - python-twitter
+    - coloredlogs
 # vim:ts=2 sw=2
