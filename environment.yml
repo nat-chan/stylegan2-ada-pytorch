@@ -61,4 +61,5 @@ dependencies:
     - pytorch-fid # ./metricsに入ってるFIDは外部で使えないので
     - clean-fid
     - pytablewriter
+    - pytablereader
 # vim:ts=2 sw=2
