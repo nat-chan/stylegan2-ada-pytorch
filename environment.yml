@@ -59,4 +59,6 @@ dependencies:
     - webdataset # CLIP美的スコア
     - datasets # CLIP美的スコア
     - pytorch-fid # ./metricsに入ってるFIDは外部で使えないので
+    - clean-fid
+    - pytablewriter
 # vim:ts=2 sw=2
