@@ -9,6 +9,7 @@ import numpy as np
 from PIL import Image
 from nokogiri.curry import curry
 from collections.abc import Iterable
+import csv
 
 root = Path("/data/natsuki")
 
@@ -90,8 +91,11 @@ class Filter(dict):
         print("{:>3}  {:>9,}  {}".format(i, len(v), k))
 
 def wrap_G(fm, device="cuda"):
-    with open(fm, 'rb') as f:
-        G = pickle.load(f)['G_ema'].to(device)
+    if isinstance(fm, torch.nn.Module):
+        G = fm
+    else:
+        with open(fm, 'rb') as f:
+            G = pickle.load(f)['G_ema'].to(device)
     def map(seed=1, psi=1):
         label = torch.zeros([1, G.c_dim], device=device)
         if isinstance(seed, Iterable):
@@ -115,3 +119,14 @@ def wrap_G(fm, device="cuda"):
     G.map = map
     G.synth = synth
     return G
+
+def csv_write(k: int, root, master, start=0, end=10**6):
+    (root/"csv").mkdir(exist_ok=True)
+    with open(root/f"csv/{k}_{start}_{end}.csv", "w") as f:
+        writer = csv.writer(f)
+        writer.writerows(master[k])
+def csv_read(k: int, root, start=0, end=10**6):
+    with open(root/f"csv/{k}_{start}_{end}.csv", "r") as f:
+        reader = csv.reader(f)
+        master_k = [(float(mscore), int(seed)) for mscore, seed in reader]
+    return master_k
