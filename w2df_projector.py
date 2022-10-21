@@ -56,6 +56,10 @@ def project(
     def logprint(*args):
         if verbose:
             print(*args)
+    def additional_feat(target): # float32(1,3,512,512)
+        df = w2df(target[0].permute(1,2,0), imode="illust(512,512,3)")
+        print("df ", end=""); check(df)
+        return df # float32(1, 1, 512, 512)
     
     G = w2df.net.decoder.G
 
