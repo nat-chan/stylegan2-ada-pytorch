@@ -76,12 +76,13 @@ def project(
         step 1000/1000: dist 0.23 loss 22.98
         step 1000/1000: dist 0.18 loss 12.93
         step 1000/1000: dist 0.24 loss 34.01 | w_std=0
-        step   100/100: dist 0.32 loss 166.92 dist2 332.73 | num_steps=100 Elapsed: 28.4 s
-        step 1000/1000: dist 0.24 loss 27.90 dist2 55.56 | make_deterministic Elapsed: 268.0 s
+        step   100/100: dist 0.32 loss 166.92  dist2 332.73 | num_steps=100 Elapsed: 28.4 s
+        step 1000/1000: dist 0.24 loss 27.90   dist2 55.56 | .5, .5 make_deterministic Elapsed: 268.0 s
+        step 1000/1000: dist 0.52 loss 1082.32 dist2 1082.3 | 0, 1
+        step 1000/1000: dist 0.22 loss 0.22    dist2 196.1  | 1, 0
         """
         return (target-synth).square().mean()
-    dist_weight, additional_weight = 1, 1
-    dist_weight, additional_weight = dist_weight/(dist_weight+additional_weight), additional_weight/(dist_weight+additional_weight)
+    dist_weight, additional_weight = .5, .5
     
 
     # Compute w stats.
