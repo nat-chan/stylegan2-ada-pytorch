@@ -56,10 +56,21 @@ def project(
     def logprint(*args):
         if verbose:
             print(*args)
+
     def additional_feat(target): # float32(1,3,512,512)
         df = w2df(target[0].permute(1,2,0), imode="illust(512,512,3)")
-        print("df ", end=""); check(df)
+#        print("df ", end=""); check(df)
         return df # float32(1, 1, 512, 512)
+
+    def additional_loss(target, synth):
+        """
+        .5, .5の設定で
+        step    1/1000: dist 0.46 loss 24976.81
+        step 1000/1000: dist 0.05 loss 2.76
+        """
+        return (target-synth).square().mean()
+    dist_weight, additional_weight = 1, 1
+    dist_weight, additional_weight = dist_weight/(dist_weight+additional_weight), additional_weight/(dist_weight+additional_weight)
     
     G = w2df.net.decoder.G
 
@@ -224,7 +235,7 @@ def run_projection(
             synth_image = (synth_image + 1) * (255/2)
             synth_image = synth_image.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
             video.append_data(np.concatenate([target_uint8, synth_image], axis=1))# uint8(512, 1024, 3)
-            if i == 0: break
+#            if i == 0: break
         video.close()
 
     # Save final projected frame and W vector.
