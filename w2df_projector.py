@@ -8,7 +8,6 @@
 
 """Project given image to the latent space of pretrained network pickle."""
 
-import copy
 import os
 from time import perf_counter
 
@@ -20,7 +19,6 @@ import torch
 import torch.nn.functional as F
 
 import dnnlib
-import legacy
 from nokogiri.working_dir import working_dir
 import shapyr
 
@@ -36,7 +34,6 @@ def project(
     target: torch.Tensor, # [C,H,W] and dynamic range [0,255], W & H must match G output resolution
     *,
     num_steps                  = 1000,
-    w_avg_samples              = 10000,
     initial_learning_rate      = 0.1,
     initial_noise_factor       = 0.05,
     lr_rampdown_length         = 0.25,
@@ -44,7 +41,6 @@ def project(
     noise_ramp_length          = 0.75,
     regularize_noise_weight    = 1e5,
     verbose                    = False,
-    yield_more                 = False,
     dist_weight                = 1,
     additional_feat            = lambda target: 0,
     additional_loss            = lambda target, synth: 0,
@@ -67,12 +63,17 @@ def project(
         .5, .5の設定で
         step    1/1000: dist 0.46 loss 24976.81
         step 1000/1000: dist 0.05 loss 2.76
+
+        .5, .5の設定で 入力sim
+        step 1000/1000: dist 0.23 loss 22.98
+        step 1000/1000: dist 0.18 loss 12.93
+        step 1000/1000: dist 0.24 loss 34.01 | w_std=0
+        step  100/100: dist 0.32 loss 166.92 dist2 332.73 | num_steps=100 Elapsed: 28.4 s
         """
         return (target-synth).square().mean()
     dist_weight, additional_weight = 1, 1
     dist_weight, additional_weight = dist_weight/(dist_weight+additional_weight), additional_weight/(dist_weight+additional_weight)
     
-    G = w2df.net.decoder.G
 
     # Compute w stats.
     logprint(f'load W midpoint and stddev from w2df')
@@ -122,12 +123,7 @@ def project(
 
         # Downsample image to 256x256 if it's larger than that. VGG was built for 224x224 images.
         synth_images = (synth_images + 1) * (255/2)
-
-        if yield_more:
-            synth_pil = PIL.Image.fromarray(
-                synth_images.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy(),
-                'RGB',
-            )
+        synth_np = synth_images.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
         
         additional_synth_features = additional_feat(synth_images)
         additional_dist = additional_loss(additional_target_features, additional_synth_features)
@@ -155,7 +151,7 @@ def project(
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
-        log_txt = f'step {step+1:>4d}/{num_steps}: dist {dist:<4.2f} loss {float(loss):<5.2f}'
+        log_txt = f'step {step+1:>4d}/{num_steps}: dist {dist:<4.2f} loss {float(loss):<5.2f} dist2 {additional_dist:<4.2f}'
         logprint(log_txt)
 
         # Save projected W for each optimization step.
@@ -167,55 +163,34 @@ def project(
                 buf -= buf.mean()
                 buf *= buf.square().mean().rsqrt()
 
-        if yield_more:
-            yield {"pil": synth_pil, "log": log_txt, "dist": float(dist), "loss": float(loss), "additional_dist": float(additional_dist)}
-        else:
-            yield w_out[step].repeat([G.mapping.num_ws, 1])
+        yield w_out[step].repeat([G.mapping.num_ws, 1]), synth_np
 
 #----------------------------------------------------------------------------
 
 @click.command()
-@click.option('--network', 'network_pkl', help='Network pickle filename', required=True)
 @click.option('--target', 'target_fname', help='Target image file to project to', required=True, metavar='FILE')
 @click.option('--num-steps',              help='Number of optimization steps', type=int, default=1000, show_default=True)
 @click.option('--seed',                   help='Random seed', type=int, default=303, show_default=True)
 @click.option('--save-video',             help='Save an mp4 video of optimization progress', type=bool, default=True, show_default=True)
 @click.option('--outdir',                 help='Where to save the output images', required=True, metavar='DIR')
 def run_projection(
-    network_pkl: str,
     target_fname: str,
     outdir: str,
     save_video: bool,
     seed: int,
     num_steps: int
 ):
-    """Project given image to the latent space of pretrained network pickle.
-
-    Examples:
-
-    \b
-    python projector.py --outdir=out --target=~/mytargetimg.png \\
-        --network=https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/ffhq.pkl
-    """
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    # Load networks.
-    print('Loading networks from "%s"...' % network_pkl)
-    device = torch.device('cuda')
-    with dnnlib.util.open_url(network_pkl) as fp:
-        G = legacy.load_network_pkl(fp)['G_ema'].requires_grad_(False).to(device) # type: ignore
+    G = w2df.net.decoder.G
+    device = "cuda"
 
     # Load target image.
     target_pil = PIL.Image.open(target_fname).convert('RGB')
-    w, h = target_pil.size
-    s = min(w, h)
-    target_pil = target_pil.crop(((w - s) // 2, (h - s) // 2, (w + s) // 2, (h + s) // 2))
-    target_pil = target_pil.resize((G.img_resolution, G.img_resolution), PIL.Image.LANCZOS)
     target_uint8 = np.array(target_pil, dtype=np.uint8)
 
     # Optimize projection.
-    start_time = perf_counter()
     projected_w_steps = project(
         G,
         target=torch.tensor(target_uint8.transpose([2, 0, 1]), device=device), # pylint: disable=not-callable
@@ -223,28 +198,22 @@ def run_projection(
         device=device,
         verbose=True
     )
-    print (f'Elapsed: {(perf_counter()-start_time):.1f} s')
 
     # Render debug output: optional video and projected image and W vector.
     os.makedirs(outdir, exist_ok=True)
     if save_video:
         video = imageio.get_writer(f'{outdir}/proj.mp4', mode='I', fps=10, codec='libx264', bitrate='16M')
         print (f'Saving optimization progress video "{outdir}/proj.mp4"')
-        for i, projected_w in enumerate(projected_w_steps):
-            synth_image = G.synthesis(projected_w.unsqueeze(0), noise_mode='const')# float32(1, 3, 512, 512)
-            synth_image = (synth_image + 1) * (255/2)
-            synth_image = synth_image.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
-            video.append_data(np.concatenate([target_uint8, synth_image], axis=1))# uint8(512, 1024, 3)
+        start_time = perf_counter()
+        for i, (projected_w, synth_np) in enumerate(projected_w_steps):
+            video.append_data(np.concatenate([target_uint8, synth_np], axis=1))# uint8(512, 1024, 3)
 #            if i == 0: break
+        print (f'Elapsed: {(perf_counter()-start_time):.1f} s')
         video.close()
 
     # Save final projected frame and W vector.
     target_pil.save(f'{outdir}/target.png')
-#    projected_w = projected_w_steps[-1]
-    synth_image = G.synthesis(projected_w.unsqueeze(0), noise_mode='const')# float32(1, 3, 512, 512)
-    synth_image = (synth_image + 1) * (255/2)
-    synth_image = synth_image.permute(0, 2, 3, 1).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
-    PIL.Image.fromarray(synth_image, 'RGB').save(f'{outdir}/proj.png')
+    PIL.Image.fromarray(synth_np, 'RGB').save(f'{outdir}/proj.png')
     np.savez(f'{outdir}/projected_w.npz', w=projected_w.unsqueeze(0).cpu().numpy())
 
 #----------------------------------------------------------------------------
