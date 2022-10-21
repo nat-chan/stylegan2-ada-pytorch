@@ -29,7 +29,7 @@ with working_dir("/home/natsuki/pixel2style2pixel"):
     w2df = W2DF()
 
 def check(arg):
-    print(str(arg.dtype).split('.')[-1] + str(tuple(arg.shape)))
+    print("\x1b[32m"+str(arg.dtype).split('.')[-1] + str(tuple(arg.shape))+"\x1b[m")
 
 def project(
     G,
@@ -56,17 +56,13 @@ def project(
     def logprint(*args):
         if verbose:
             print(*args)
-
+    
     G = w2df.net.decoder.G
 
     # Compute w stats.
-    logprint(f'Computing W midpoint and stddev using {w_avg_samples} samples...')
-    z_samples = np.random.RandomState(123).randn(w_avg_samples, G.z_dim)# uint32(624,)
-    w_samples = G.mapping(torch.from_numpy(z_samples).to(device), None)  # [N, L, C]# float32(10000, 16, 512)
-    w_samples = w_samples[:, :1, :].cpu().numpy().astype(np.float32)       # [N, 1, C]
-    w_avg = np.mean(w_samples, axis=0, keepdims=True)      # [1, 1, C] # float32(1, 1, 512)
-    w_std = (np.sum((w_samples - w_avg) ** 2) / w_avg_samples) ** 0.5 # float32()
-    print(f"{w_std=}")
+    logprint(f'load W midpoint and stddev from w2df')
+    w_avg = w2df.net.latent_avg[0][None,None,:] # [1, 1, C] # float32(1, 1, 512)
+    w_std = 20.59920993630580 # XXX Hard Coding.
 
     # Setup noise inputs.
     noise_bufs = { name: buf for (name, buf) in G.synthesis.named_buffers() if 'noise_const' in name }
@@ -77,7 +73,7 @@ def project(
         vgg16 = torch.jit.load(f).eval().to(device)
 
     # Features for target image.
-    target_images = target.unsqueeze(0).to(device).to(torch.float32)
+    target_images = target.unsqueeze(0).to(device).to(torch.float32) # float32(1, 3, 512, 512)
     additional_target_features = additional_feat(target_images)
     if target_images.shape[2] > 256:
         target_images = F.interpolate(target_images, size=(256, 256), mode='area')# float32(1, 3, 256, 256)
@@ -86,7 +82,6 @@ def project(
     w_opt = torch.tensor(w_avg, dtype=torch.float32, device=device, requires_grad=True) # pylint: disable=not-callable # float32(1, 1, 512)
     # 記録していくやつ
     w_out = torch.zeros([num_steps] + list(w_opt.shape[1:]), dtype=torch.float32, device=device) # float32(1000, 1, 512)
-    check(w_out)
     optimizer = torch.optim.Adam([w_opt] + list(noise_bufs.values()), betas=(0.9, 0.999), lr=initial_learning_rate)
 
     # Init noise.
