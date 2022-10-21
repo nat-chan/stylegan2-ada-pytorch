@@ -17,10 +17,18 @@ import numpy as np
 import PIL.Image
 import torch
 import torch.nn.functional as F
+from pathlib import Path
+from nokogiri.working_dir import working_dir
+import random
+
+def make_deterministic(seed=0):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
 
 import dnnlib
-from nokogiri.working_dir import working_dir
-import shapyr
 
 with working_dir("/home/natsuki/pixel2style2pixel"):
     from script_w2df import W2DF
@@ -68,7 +76,8 @@ def project(
         step 1000/1000: dist 0.23 loss 22.98
         step 1000/1000: dist 0.18 loss 12.93
         step 1000/1000: dist 0.24 loss 34.01 | w_std=0
-        step  100/100: dist 0.32 loss 166.92 dist2 332.73 | num_steps=100 Elapsed: 28.4 s
+        step   100/100: dist 0.32 loss 166.92 dist2 332.73 | num_steps=100 Elapsed: 28.4 s
+        step 1000/1000: dist 0.24 loss 27.90 dist2 55.56 | make_deterministic Elapsed: 268.0 s
         """
         return (target-synth).square().mean()
     dist_weight, additional_weight = 1, 1
@@ -170,18 +179,16 @@ def project(
 @click.command()
 @click.option('--target', 'target_fname', help='Target image file to project to', required=True, metavar='FILE')
 @click.option('--num-steps',              help='Number of optimization steps', type=int, default=1000, show_default=True)
-@click.option('--seed',                   help='Random seed', type=int, default=303, show_default=True)
 @click.option('--save-video',             help='Save an mp4 video of optimization progress', type=bool, default=True, show_default=True)
 @click.option('--outdir',                 help='Where to save the output images', required=True, metavar='DIR')
 def run_projection(
     target_fname: str,
     outdir: str,
     save_video: bool,
-    seed: int,
     num_steps: int
 ):
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    make_deterministic()
+    stem = Path(target_fname).stem
 
     G = w2df.net.decoder.G
     device = "cuda"
@@ -202,19 +209,20 @@ def run_projection(
     # Render debug output: optional video and projected image and W vector.
     os.makedirs(outdir, exist_ok=True)
     if save_video:
-        video = imageio.get_writer(f'{outdir}/proj.mp4', mode='I', fps=10, codec='libx264', bitrate='16M')
+        video = imageio.get_writer(f'{outdir}/{stem}.mp4', mode='I', fps=10, codec='libx264', bitrate='16M')
         print (f'Saving optimization progress video "{outdir}/proj.mp4"')
-        start_time = perf_counter()
-        for i, (projected_w, synth_np) in enumerate(projected_w_steps):
+    start_time = perf_counter()
+    for i, (projected_w, synth_np) in enumerate(projected_w_steps):
+        if save_video:
             video.append_data(np.concatenate([target_uint8, synth_np], axis=1))# uint8(512, 1024, 3)
-#            if i == 0: break
-        print (f'Elapsed: {(perf_counter()-start_time):.1f} s')
+        #if i == 0: break
+    print (f'Elapsed: {(perf_counter()-start_time):.1f} s')
+    if save_video:
         video.close()
 
     # Save final projected frame and W vector.
-    target_pil.save(f'{outdir}/target.png')
-    PIL.Image.fromarray(synth_np, 'RGB').save(f'{outdir}/proj.png')
-    np.savez(f'{outdir}/projected_w.npz', w=projected_w.unsqueeze(0).cpu().numpy())
+    PIL.Image.fromarray(synth_np, 'RGB').save(f'{outdir}/{stem}.png')
+    np.savez(f'{outdir}/{stem}.npz', w=projected_w.unsqueeze(0).cpu().numpy())
 
 #----------------------------------------------------------------------------
 
