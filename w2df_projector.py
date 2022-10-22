@@ -19,6 +19,8 @@ import torch
 import torch.nn.functional as F
 from pathlib import Path
 from nokogiri.working_dir import working_dir
+from nokogiri.defaultdotdict import defaultdotdict
+import json
 import random
 
 def make_deterministic(seed=0):
@@ -30,15 +32,11 @@ def make_deterministic(seed=0):
 
 import dnnlib
 
-with working_dir("/home/natsuki/pixel2style2pixel"):
-    from script_w2df import W2DF
-    w2df = W2DF()
-
 def check(arg):
     print("\x1b[32m"+str(arg.dtype).split('.')[-1] + str(tuple(arg.shape))+"\x1b[m")
 
 def project(
-    G,
+    w2df,
     target: torch.Tensor, # [C,H,W] and dynamic range [0,255], W & H must match G output resolution
     *,
     num_steps                  = 1000,
@@ -55,6 +53,7 @@ def project(
     additional_weight          = 0,
     device: torch.device
 ):
+    G = w2df.net.decoder.G
     assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
 
     def logprint(*args):
@@ -80,6 +79,8 @@ def project(
         step 1000/1000: dist 0.24 loss 27.90   dist2 55.56 | .5, .5 make_deterministic Elapsed: 268.0 s
         step 1000/1000: dist 0.52 loss 1082.32 dist2 1082.3 | 0, 1
         step 1000/1000: dist 0.22 loss 0.22    dist2 196.1  | 1, 0
+        step 1000/1000: dist 0.09 loss 10.06   dist2 20.03  | global_avg 無彩色achromatic std = 20
+        step 1000/1000: dist 0.07 loss 8.26    dist2 16.45  | global_avg std = 0
         """
         return (target-synth).square().mean()
     dist_weight, additional_weight = .5, .5
@@ -88,7 +89,6 @@ def project(
     # Compute w stats.
     logprint(f'load W midpoint and stddev from w2df')
     w_avg = w2df.net.latent_avg[0][None,None,:] # [1, 1, C] # float32(1, 1, 512)
-    w_std = 20.59920993630580 # XXX Hard Coding.
 
     # Setup noise inputs.
     noise_bufs = { name: buf for (name, buf) in G.synthesis.named_buffers() if 'noise_const' in name }
@@ -105,9 +105,7 @@ def project(
         target_images = F.interpolate(target_images, size=(256, 256), mode='area')# float32(1, 3, 256, 256)
     target_features = vgg16(target_images, resize_images=False, return_lpips=True)# float32(1, 7995392)
 
-    w_opt = torch.tensor(w_avg, dtype=torch.float32, device=device, requires_grad=True) # pylint: disable=not-callable # float32(1, 1, 512)
-    # 記録していくやつ
-    w_out = torch.zeros([num_steps] + list(w_opt.shape[1:]), dtype=torch.float32, device=device) # float32(1000, 1, 512)
+    w_opt = torch.tensor(w_avg, dtype=torch.float32, device=device, requires_grad=True)  # float32(1, 1, 512)
     optimizer = torch.optim.Adam([w_opt] + list(noise_bufs.values()), betas=(0.9, 0.999), lr=initial_learning_rate)
 
     # Init noise.
@@ -118,7 +116,6 @@ def project(
     for step in range(num_steps):
         # Learning rate schedule.
         t = step / num_steps
-        w_noise_scale = w_std * initial_noise_factor * max(0.0, 1.0 - t / noise_ramp_length) ** 2
         lr_ramp = min(1.0, (1.0 - t) / lr_rampdown_length)
         lr_ramp = 0.5 - 0.5 * np.cos(lr_ramp * np.pi)
         lr_ramp = lr_ramp * min(1.0, t / lr_rampup_length)
@@ -127,8 +124,7 @@ def project(
             param_group['lr'] = lr
 
         # Synth images from opt_w.
-        w_noise = torch.randn_like(w_opt) * w_noise_scale # float32(1, 1, 512)
-        ws = (w_opt + w_noise).repeat([1, G.mapping.num_ws, 1]) # float32(1, 16, 512)
+        ws = w_opt.repeat([1, G.mapping.num_ws, 1]) # float32(1, 16, 512)
         synth_images = G.synthesis(ws, noise_mode='const')# float32(1, 3, 512, 512)
 
         # Downsample image to 256x256 if it's larger than that. VGG was built for 224x224 images.
@@ -164,16 +160,13 @@ def project(
         log_txt = f'step {step+1:>4d}/{num_steps}: dist {dist:<4.2f} loss {float(loss):<5.2f} dist2 {additional_dist:<4.2f}'
         logprint(log_txt)
 
-        # Save projected W for each optimization step.
-        w_out[step] = w_opt.detach()[0]
-
         # Normalize noise.
         with torch.no_grad():
             for buf in noise_bufs.values():
                 buf -= buf.mean()
                 buf *= buf.square().mean().rsqrt()
 
-        yield w_out[step].repeat([G.mapping.num_ws, 1]), synth_np
+        yield w_opt.detach()[0].repeat([G.mapping.num_ws, 1]), synth_np, additional_dist
 
 #----------------------------------------------------------------------------
 
@@ -182,25 +175,29 @@ def project(
 @click.option('--num-steps',              help='Number of optimization steps', type=int, default=1000, show_default=True)
 @click.option('--save-video',             help='Save an mp4 video of optimization progress', type=bool, default=True, show_default=True)
 @click.option('--outdir',                 help='Where to save the output images', required=True, metavar='DIR')
+@click.option('--sim',                    help='extract skech and simplify input image', type=bool, default=False)
 def run_projection(
     target_fname: str,
     outdir: str,
     save_video: bool,
-    num_steps: int
+    num_steps: int,
+    sim: bool
 ):
     make_deterministic()
     stem = Path(target_fname).stem
 
-    G = w2df.net.decoder.G
     device = "cuda"
 
     # Load target image.
     target_pil = PIL.Image.open(target_fname).convert('RGB')
     target_uint8 = np.array(target_pil, dtype=np.uint8)
+    if sim:
+        target_tensor = torch.Tensor(target_uint8).to(device)
+        target_uint8 = (255.0*w2df(target_tensor, imode="illust(512,512,3)", omode="sim(1,1,512,512)")[0,0,:,:].cpu().detach().numpy()).astype(np.uint8)[:,:,None][:,:,[0,0,0]]
 
     # Optimize projection.
     projected_w_steps = project(
-        G,
+        w2df,
         target=torch.tensor(target_uint8.transpose([2, 0, 1]), device=device), # pylint: disable=not-callable
         num_steps=num_steps,
         device=device,
@@ -213,7 +210,7 @@ def run_projection(
         video = imageio.get_writer(f'{outdir}/{stem}.mp4', mode='I', fps=10, codec='libx264', bitrate='16M')
         print (f'Saving optimization progress video "{outdir}/proj.mp4"')
     start_time = perf_counter()
-    for i, (projected_w, synth_np) in enumerate(projected_w_steps):
+    for i, (projected_w, synth_np, additional_dist) in enumerate(projected_w_steps):
         if save_video:
             video.append_data(np.concatenate([target_uint8, synth_np], axis=1))# uint8(512, 1024, 3)
         #if i == 0: break
@@ -224,10 +221,16 @@ def run_projection(
     # Save final projected frame and W vector.
     PIL.Image.fromarray(synth_np, 'RGB').save(f'{outdir}/{stem}.png')
     np.savez(f'{outdir}/{stem}.npz', w=projected_w.unsqueeze(0).cpu().numpy())
+    with open(f'{outdir}/{stem}.txt', "w") as f:
+        f.write(str(float(additional_dist)))
 
 #----------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    with working_dir("/home/natsuki/pixel2style2pixel"):
+        from script_w2df import W2DF
+        w2df = W2DF()
+
     run_projection() # pylint: disable=no-value-for-parameter
 
 #----------------------------------------------------------------------------
