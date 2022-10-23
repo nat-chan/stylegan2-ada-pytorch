@@ -8,6 +8,8 @@
 
 """Project given image to the latent space of pretrained network pickle."""
 
+from ast import Call
+from email.policy import default
 import os
 from time import perf_counter
 
@@ -22,6 +24,7 @@ from nokogiri.working_dir import working_dir
 from nokogiri.defaultdotdict import defaultdotdict
 import json
 import random
+from typing import Union, Callable, Optional
 
 def make_deterministic(seed=0):
     random.seed(seed)
@@ -51,6 +54,7 @@ def project(
     additional_weight          = .5,
     w_avg                      = None,
     w_std                      = 0, # 20.59920993630580,
+    custom_lr                  = -1,
     device: torch.device
 ):
     G = w2df.net.decoder.G
@@ -120,6 +124,11 @@ def project(
         lr_ramp = 0.5 - 0.5 * np.cos(lr_ramp * np.pi)
         lr_ramp = lr_ramp * min(1.0, t / lr_rampup_length)
         lr = initial_learning_rate * lr_ramp
+        if custom_lr != -1:
+            if callable(custom_lr):
+                lr = custom_lr(t)
+            else:
+                lr = custom_lr
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
 
@@ -173,20 +182,29 @@ def project(
 
 @click.command()
 @click.option('--target', 'target_fname', help='Target image file to project to', required=True, metavar='FILE')
-@click.option('--num-steps',              help='Number of optimization steps', type=int, default=1000, show_default=True)
-@click.option('--save-video',             help='Save an mp4 video of optimization progress', type=bool, default=True, show_default=True)
+@click.option('--num_steps',              help='Number of optimization steps', type=int, default=1000, show_default=True)
+@click.option('--save_video',             help='Save an mp4 video of optimization progress', type=bool, default=True, show_default=True)
 @click.option('--outdir',                 help='Where to save the output images', required=True, metavar='DIR')
 @click.option('--sim',                    help='extract skech and simplify input image', type=bool, default=False)
+@click.option('--verbose',                help='verbose', type=bool, default=True)
+@click.option('--dist_weight',            help='dist_weight', type=float, default=0.5)
+@click.option('--additional_weight',      help='additional_weight', type=float, default=0.5)
+@click.option('--w_std',                  help='w_std', type=float, default=0)
+@click.option('--custom_lr',              help='custom_lr', type=float, default=-1)
 def run_projection(
     target_fname: str,
     outdir: str,
     save_video: bool,
     num_steps: int,
-    sim: bool
+    sim: bool,
+    verbose: bool,
+    dist_weight: float,
+    additional_weight: float,
+    w_std:  float,
+    custom_lr: Union[Callable, float],
 ):
     make_deterministic()
     stem = Path(target_fname).stem
-
     device = "cuda"
 
     # Load target image.
@@ -202,7 +220,11 @@ def run_projection(
         target=torch.tensor(target_uint8.transpose([2, 0, 1]), device=device), # pylint: disable=not-callable
         num_steps=num_steps,
         device=device,
-        verbose=True
+        verbose=verbose,
+        dist_weight=dist_weight,
+        additional_weight=additional_weight,
+        w_std=w_std,
+        custom_lr=custom_lr,
     )
 
     # Render debug output: optional video and projected image and W vector.
