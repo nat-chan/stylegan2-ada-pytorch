@@ -8,6 +8,7 @@
 
 """Project given image to the latent space of pretrained network pickle."""
 
+import copy
 from ast import Call
 from email.policy import default
 import os
@@ -57,7 +58,7 @@ def project(
     custom_lr                  = -1,
     device: torch.device
 ):
-    G = w2df.net.decoder.G
+    G = copy.deepcopy(w2df.net.decoder.G).eval().requires_grad_(False).to(device) # type: ignore
     assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
 
     def logprint(*args):
@@ -94,7 +95,8 @@ def project(
         w_avg = w2df.net.latent_avg[0][None,None,:] # [1, 1, C] # float32(1, 1, 512)
 
     # Setup noise inputs.
-    noise_bufs = { name: buf for (name, buf) in G.synthesis.named_buffers() if 'noise_const' in name }
+    # FIX RuntimeError: a view of a leaf Variable that requires grad is being used in an in-place operation.
+    noise_bufs = { name: torch.randn_like(buf, requires_grad=True) for (name, buf) in G.synthesis.named_buffers() if 'noise_const' in name }
 
     # Load VGG16 feature detector.
     url = 'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/metrics/vgg16.pt'
@@ -112,10 +114,10 @@ def project(
     optimizer = torch.optim.Adam([w_opt] + list(noise_bufs.values()), betas=(0.9, 0.999), lr=initial_learning_rate)
 
     # Init noise.
-    for buf in noise_bufs.values():
-        buf[:] = torch.randn_like(buf)
-        buf.requires_grad = True
-
+#    for buf in noise_bufs.values():
+#        buf[:] = torch.randn_like(buf)
+#        buf.requires_grad = True
+#
     for step in range(num_steps):
         # Learning rate schedule.
         t = step / num_steps
