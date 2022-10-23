@@ -92,7 +92,7 @@ def project(
     # Compute w stats.
     logprint(f'load W midpoint and stddev from w2df')
     if w_avg is None:
-        w_avg = w2df.net.latent_avg[0][None,None,:] # [1, 1, C] # float32(1, 1, 512)
+        w_avg = w2df.net.latent_avg[None,:,:] # f(1,16,512)
 
     # Setup noise inputs.
     # FIX RuntimeError: a view of a leaf Variable that requires grad is being used in an in-place operation.
@@ -110,14 +110,9 @@ def project(
         target_images = F.interpolate(target_images, size=(256, 256), mode='area')# float32(1, 3, 256, 256)
     target_features = vgg16(target_images, resize_images=False, return_lpips=True)# float32(1, 7995392)
 
-    w_opt = torch.tensor(w_avg, dtype=torch.float32, device=device, requires_grad=True)  # float32(1, 1, 512)
+    w_opt = torch.zeros([1,1,512], dtype=torch.float32, device=device, requires_grad=True)  # float32(1, 1, 512)
     optimizer = torch.optim.Adam([w_opt] + list(noise_bufs.values()), betas=(0.9, 0.999), lr=initial_learning_rate)
 
-    # Init noise.
-#    for buf in noise_bufs.values():
-#        buf[:] = torch.randn_like(buf)
-#        buf.requires_grad = True
-#
     for step in range(num_steps):
         # Learning rate schedule.
         t = step / num_steps
@@ -136,7 +131,7 @@ def project(
 
         # Synth images from opt_w.
         w_noise = torch.randn_like(w_opt) * w_noise_scale # float32(1, 1, 512)
-        ws = (w_opt + w_noise).repeat([1, G.mapping.num_ws, 1]) # float32(1, 16, 512)
+        ws = w_avg + (w_opt + w_noise).repeat([1, G.mapping.num_ws, 1]) # float32(1, 16, 512)
         synth_images = G.synthesis(ws, noise_mode='const')# float32(1, 3, 512, 512)
 
         # Downsample image to 256x256 if it's larger than that. VGG was built for 224x224 images.
@@ -178,7 +173,7 @@ def project(
                 buf -= buf.mean()
                 buf *= buf.square().mean().rsqrt()
 
-        yield w_opt.detach()[0].repeat([G.mapping.num_ws, 1]), synth_np, additional_dist
+        yield ws.detach(), synth_np, additional_dist
 
 #----------------------------------------------------------------------------
 
@@ -245,7 +240,7 @@ def run_projection(
 
     # Save final projected frame and W vector.
     PIL.Image.fromarray(synth_np, 'RGB').save(f'{outdir}/{stem}.png')
-    np.savez(f'{outdir}/{stem}.npz', w=projected_w.unsqueeze(0).cpu().numpy())
+    np.savez(f'{outdir}/{stem}.npz', w=projected_w.cpu().numpy())
     with open(f'{outdir}/{stem}.txt', "w") as f:
         f.write(str(float(additional_dist)))
 
