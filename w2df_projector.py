@@ -47,10 +47,10 @@ def project(
     noise_ramp_length          = 0.75,
     regularize_noise_weight    = 1e5,
     verbose                    = False,
-    dist_weight                = 1,
-    additional_feat            = lambda target: 0,
-    additional_loss            = lambda target, synth: 0,
-    additional_weight          = 0,
+    dist_weight                = .5,
+    additional_weight          = .5,
+    w_avg                      = None,
+    w_std                      = 0, # 20.59920993630580,
     device: torch.device
 ):
     G = w2df.net.decoder.G
@@ -62,7 +62,6 @@ def project(
 
     def additional_feat(target): # float32(1,3,512,512)
         df = w2df(target[0].permute(1,2,0), imode="illust(512,512,3)")
-#        print("df ", end=""); check(df)
         return df # float32(1, 1, 512, 512)
 
     def additional_loss(target, synth):
@@ -83,12 +82,12 @@ def project(
         step 1000/1000: dist 0.07 loss 8.26    dist2 16.45  | global_avg std = 0
         """
         return (target-synth).square().mean()
-    dist_weight, additional_weight = .5, .5
     
 
     # Compute w stats.
     logprint(f'load W midpoint and stddev from w2df')
-    w_avg = w2df.net.latent_avg[0][None,None,:] # [1, 1, C] # float32(1, 1, 512)
+    if w_avg is None:
+        w_avg = w2df.net.latent_avg[0][None,None,:] # [1, 1, C] # float32(1, 1, 512)
 
     # Setup noise inputs.
     noise_bufs = { name: buf for (name, buf) in G.synthesis.named_buffers() if 'noise_const' in name }
@@ -116,6 +115,7 @@ def project(
     for step in range(num_steps):
         # Learning rate schedule.
         t = step / num_steps
+        w_noise_scale = w_std * initial_noise_factor * max(0.0, 1.0 - t / noise_ramp_length) ** 2
         lr_ramp = min(1.0, (1.0 - t) / lr_rampdown_length)
         lr_ramp = 0.5 - 0.5 * np.cos(lr_ramp * np.pi)
         lr_ramp = lr_ramp * min(1.0, t / lr_rampup_length)
@@ -124,7 +124,8 @@ def project(
             param_group['lr'] = lr
 
         # Synth images from opt_w.
-        ws = w_opt.repeat([1, G.mapping.num_ws, 1]) # float32(1, 16, 512)
+        w_noise = torch.randn_like(w_opt) * w_noise_scale # float32(1, 1, 512)
+        ws = (w_opt + w_noise).repeat([1, G.mapping.num_ws, 1]) # float32(1, 16, 512)
         synth_images = G.synthesis(ws, noise_mode='const')# float32(1, 3, 512, 512)
 
         # Downsample image to 256x256 if it's larger than that. VGG was built for 224x224 images.
