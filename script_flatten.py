@@ -6,22 +6,19 @@ import numpy as np
 from skimage import io
 from skimage.segmentation import slic
 import sys
-# id2 = CurriedFunc(lambda *args, **kwargs: id2fname(*args, **kwargs, root="./root"))
-# _id = random.choice(list(d.indices))
-# %%
+import argparse
+from argparse import Namespace
+from pathlib import Path
+import csv
 
-def check():
-    from dotdict import dotdict
-    d = dotdict()
-    for key in ["whitewaist_mask", "whitewaist", "indices", "flatten", "v4", "v4_val"]:
-        d[key] = set(map(fname2id, (root/f"danbooru2020/{key}").glob("**/*.p*")))
-        print(key, len(d[key]))
-
-if __name__ == "__main__":
-    for i, fname in enumerate(tqdm(list(map(lambda x: x.strip(), sys.stdin)), dynamic_ncols=True)):
+def main(args: Namespace) -> None:
+    with open(args.csvpath, "r") as f:
+        reader = csv.reader(f)
+        file_paths = [Path(line[0]) for line in reader]
+    for i, fname in enumerate(tqdm(file_paths, dynamic_ncols=True)):
         _id = fname2id(fname)
-        for p in [1] + list(range(2, 20, 2)) + list(range(20, 100+1, 10)):
-            dst = f"flatten_/slic{p}"
+        for p in [1, 30]:
+            dst = f"whitewaist_slic{p}"
             if i == 0: prepare(dst)
             flat = io.imread(id2.flatten(_id))
             mask = io.imread(id2.whitewaist_mask(_id)) >= 128
@@ -35,4 +32,11 @@ if __name__ == "__main__":
                     index = np.where(seg == j)
                     out[index] = np.median(flat[index], axis=0)
             io.imsave(id2[dst](_id), out, check_contrast=False)
+
 # %%
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--csvpath", type=str, default="/data/natsuki/danbooru2020/filepath.csv")
+    parser.add_argument("--root", type=str, default="/data/natsuki/danbooru2020")
+    args = parser.parse_args()
+    main(args)
