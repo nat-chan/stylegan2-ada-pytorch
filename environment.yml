@@ -52,5 +52,14 @@ dependencies:
     - nokogiri # 自作utility関数群
     - gradio # app
     - qrcode
-    - twitter
+    - pyzbar # sudo apt install libzbar0
+    - python-twitter
+    - coloredlogs
+    - git+https://github.com/openai/CLIP # CLIP美的スコア
+    - webdataset # CLIP美的スコア
+    - datasets # CLIP美的スコア
+    - pytorch-fid # ./metricsに入ってるFIDは外部で使えないので
+    - clean-fid
+    - pytablewriter
+    - pytablereader
 # vim:ts=2 sw=2
